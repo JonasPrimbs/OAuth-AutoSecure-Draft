@@ -17,7 +17,7 @@ Even with the use of AI, it is hard to maintain and secure large code bases.
 
 Modern security concepts like transaction tokens further improve system security by utilizing transaction tokens in backend services.
 Using transaction tokens on the client comes with the advantage that a compromized resource server cannot use a received access token to compromize data on other resource servers.
-This improves security but heavily increases complexity of the token handling implementation at the client.
+This improves security by implementing least-privilege and zero trust concepts, but heavily increases complexity of the token handling implementation at the client.
 
 In MCP, the MCP client automatically handles authorization requests and bearer token insertion into authorization headers.
 This draft applies the same concept to generic HTTP client implementation.
@@ -38,3 +38,106 @@ With OAuth AutoSecure, the browser puts bearer tokens into the authorization hea
 - [OAuth 2.0 Authorization Server Metadata](https://datatracker.ietf.org/doc/rfc8414/): Automated discovery of the authorization server
 - [OAuth Client ID Metadata](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/): Automated discovery of the Client
 - [FedCM](https://github.com/w3c-fedid/FedCM): Browser API for managing the resource owner's identity at multiple authorization servers
+
+## Concept
+
+1. The resource owner opens the web application in their web browser.
+
+```bash
+open https://client.example.com/
+```
+
+2. The web applications uses FedCM to trigger the authorization code flow.
+
+```js
+const credential = await navigator.credentials.get({
+  identity: {
+    providers: [{
+      configURL: 'https://as.example.com/fedcm.json',
+      clientId: 'example_client',
+      fields: ['profile', 'email'], // Requested default scopes
+      authorization: true // Indicates, that this is an OAuth authorization request
+    }]
+  }
+});
+```
+
+3. During the authorization code flow, the web browser loads the client metadata from `{base-url}/.well-known/client-metadata`:
+
+```json
+{
+  "authorization": [
+    {
+      "authorizationServer": "https://as.example.com/",
+      "clientId": "example_client",
+      "resources": [
+        "https://rs1.example.com/*",
+        "https://rs.example.com/rs2/*",
+      ]
+    }
+  ],
+}
+```
+
+4. The web browser remembers this client metadata for all FedCM credentials. They can be accessed as follows:
+
+```js
+print(credential.clientDescription.authorization[0].authorizationServer); // Returns "https://as.example.com/"
+print(credential.clientDescription.authorization[0].clientId); // Returns "example_client"
+print(credential.clientDescription.authorization[0].resources); // Returns ["https://rs1.example.com","https://rs.example.com/rs2"]
+```
+
+5. The web application sends a resource request using the Fetch API:
+
+```js
+const response = await fetch('https://rs1.example.com/userdata', {
+  credential: credential  // The credential from FedCM
+});
+```
+
+6. In background, the web browser checks whether any of the credential's resources match the requested URL.
+If not, this is a normal GET request.
+Otherwise, the browser attaches the bearer token to the request in the authorization header:
+
+```http
+GET /userdata HTTP/1.1
+Host: rs1.example.com
+Authorization: Bearer {access-token}
+```
+
+7. If the access token misses required scopes, the resource server answers with the following HTTP response:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer realm="as.example.com",
+                 error="insufficient_scope",
+                 error_description="The request requires higher privileges."
+                 scope="rs1_read"
+```
+
+8. Instead of responding with this error to the fetch call, the user agent uses a dialog to inform the resource owner that the request has failed and demands more permissions.
+If the user clicks "accept", FedCM initiates another authorization flow with the extended scope (`profile email rs1_read`).
+In the FedCM popup containing the authorization server's authorization screen, the resource owner grants permissions to the client.
+Afterwards, the Fetch API repeats the request with the updated scope and responds to the fetch call with the final response.
+
+9. The currently granted scope can be introspected via FedCM API as follows:
+
+```js
+print(credential.fields); // Returns ["profile", "email", "rs1_read"]
+```
+
+## Security Considerations
+
+### XSS Protection
+
+Since the access token and refresh token is neither accessible through the FedCM, nor the Fetch API, they are not accessible directly with via JavaScript.
+Therefore, attackers with a successful XSS attack are never able to access any of these tokens directly.
+
+The client metadata contains an list of allowed resource endpoints in `authorization.[0].resources`.
+By strictly checking this allow-list, the web browser prevents sending an authorized request containing a valid access token to a malicious endpoint controlled by the attacker.
+
+### CSRF Protection
+
+To use the Fetch API for authorized resource requests, the `credential` option of the FedCM API must be set.
+Since the `credential` object of FedCM API is individual per browser tab and origin, a `credential` object is not accessible from another tab or origin within the same browser session.
+This mitigates cross-site-request-forgery (CSRF) attacks.
