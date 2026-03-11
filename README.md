@@ -1,4 +1,4 @@
-# OAuth-AUTOrize-Draft
+# Draft: OAuth AUTOrize
 
 A draft how OAuth 2.0 can be implemented securely without developers need to care about OAuth by automatically request authorization (AUTOrize) based on the REST API.
 
