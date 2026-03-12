@@ -1,6 +1,7 @@
-# Draft: OAuth AUTOrize
+# Draft: OAutorize
 
-A draft how OAuth 2.0 can be implemented securely without developers need to care about OAuth by automatically request authorization (AUTOrize) based on the REST API.
+This is an Internet Draft on the automation of OAuth 2.0 authorization mechanisms into future web browsers.
+Because of its OAuth authorization automation aspects, it is called O[Auto]rize (the missing 'h' is intended).
 
 ## Abstract
 
